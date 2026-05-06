@@ -2,6 +2,8 @@
 
 Experimental web framework for AI-agent-friendly pages — see [`docs/agent-framework/`](docs/agent-framework/).
 
+**Status:** pre-release, in active design. License: [MIT](LICENSE). Governance: [docs/governance.md](docs/governance.md).
+
 ## Repo layout
 
 ```
