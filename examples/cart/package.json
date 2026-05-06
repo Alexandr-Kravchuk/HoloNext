@@ -1,0 +1,14 @@
+{
+  "name": "@holonext/example-cart",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --hot run server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@holonext/runtime": "workspace:*",
+    "hono": "^4.6.0"
+  }
+}

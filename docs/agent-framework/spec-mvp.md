@@ -22,6 +22,8 @@
 | 10 | Data freshness | **`freshness.policy` + `as_of` у returns** | Агент знає live vs cached vs snapshot |
 | 11 | Sortable collections | **`sortable_fields` у query Action** | Симетрично до `searchable_fields` |
 | 12 | Scope boundary | **Action-rich pages only; content → llms.txt** | Чітке розмежування з Schema.org / llms.txt |
+| 13 | Tool-name mapping | **`.` ↔ `__` детермінований mapping** | Підтверджено proto: MCP/Anthropic/OpenAI всі забороняють крапки |
+| 14 | MCP transports | **WebMCP + MCP stdio + MCP HTTP — equivalent primary** | Один набір Actions → всі класси агентів через тонкий bridge |
 
 ---
 
@@ -77,6 +79,19 @@ form.password-reset.submit
 - Qualifier — опціонально, для розрізнення кількох форм одного verb
 
 **Стабільність:** ID не змінюється при рефакторингу HTML, перейменуванні CSS-класів, i18n.
+
+### 1.0 Норма: tool-name interop mapping
+
+LLM tool-use API (Anthropic Messages, OpenAI function calling, MCP) обмежують ім'я tool регулярним виразом `^[a-zA-Z0-9_-]{1,64}$` — **крапки заборонені**. Наші Semantic ID використовують крапку як роздільник.
+
+Тому будь-який agent transport, що проксює Actions у LLM tools, **MUST** виконувати наступний детермінований mapping:
+
+- **ID → tool name:** замінити кожну `.` на `__` (подвійне підкреслення)
+- **tool name → ID:** замінити кожне `__` на `.`
+
+`cart.add` ↔ `cart__add`, `form.password-reset.submit` ↔ `form__password-reset__submit`.
+
+**Норма:** scope/verb/qualifier сегменти **MUST NOT** містити `__` як підрядок — інакше mapping неоднозначний. Це підтверджено proto з MCP-bridge і Anthropic/OpenAI SDK.
 
 ### 1.1 Норма: prefer entity-ID actions over DOM-positional
 
@@ -366,7 +381,23 @@ X-Agent-Session: <session-id>
 }
 ```
 
-### 4.3 Декларативний (HTML, zero-JS)
+### 4.3 Equivalent: MCP-over-stdio / MCP-over-HTTP (server-side agents)
+
+WebMCP та `Server-side` MCP — **той самий протокол** на різних транспортах:
+- WebMCP: `navigator.modelContext` у браузері (Chrome only, early preview)
+- MCP stdio: child process з JSON-RPC через stdin/stdout (Claude Code, Codex CLI)
+- MCP HTTP: JSON-RPC через HTTP (remote MCP servers)
+
+Будь-який з цих transports — **рівнозначний primary** для свого класу агентів. Тонкий **MCP-bridge** (~80 рядків коду) проксує Manifest → MCP `tools/list` і HTTP Action → MCP `tools/call`. Це вже реалізовано як `packages/mcp-bridge` у proto.
+
+Це дає:
+- Browser-based агенти → WebMCP
+- Local CLI агенти (Claude Code, Codex) → MCP stdio через bridge
+- Remote agents → HTTP fallback або MCP HTTP
+
+Розробник пише **один** набір Actions, не дублюючи логіку для кожного transport.
+
+### 4.4 Декларативний (HTML, zero-JS)
 
 ```html
 <button

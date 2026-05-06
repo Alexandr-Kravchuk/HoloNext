@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>HoloNext Demo Cart</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { margin-bottom: 0.2rem; }
+    .sub { color: #777; margin-bottom: 2rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; }
+    .product { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 0.8rem; }
+    .product h3 { margin: 0 0 0.3rem; }
+    .product .price { color: #555; }
+    button { background: #1a1a1a; color: white; border: 0; border-radius: 6px; padding: 0.5rem 1rem; cursor: pointer; }
+    button.secondary { background: #eee; color: #1a1a1a; }
+    .cart-item { display: flex; justify-content: space-between; padding: 0.5rem 0; border-bottom: 1px solid #eee; }
+    .total { font-weight: 600; padding: 1rem 0; border-top: 2px solid #1a1a1a; margin-top: 1rem; }
+    code { background: #f4f4f4; padding: 0.2rem 0.4rem; border-radius: 3px; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <h1>HoloNext Demo Cart</h1>
+  <p class="sub">Manifest at <code>/.well-known/agent-manifest.json</code> · Events stream at <code>/api/agent/events</code></p>
+  <div class="grid">
+    <section>
+      <h2>Products</h2>
+      <div id="products">Loading…</div>
+    </section>
+    <section>
+      <h2>Cart</h2>
+      <div id="cart">Loading…</div>
+    </section>
+  </div>
+  <script src="./app.js"></script>
+</body>
+</html>

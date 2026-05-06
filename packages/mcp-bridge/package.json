@@ -1,0 +1,17 @@
+{
+  "name": "@holonext/mcp-bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "main": "src/server.ts",
+  "bin": {
+    "holonext-mcp-bridge": "src/server.ts"
+  },
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

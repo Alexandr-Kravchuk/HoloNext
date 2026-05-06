@@ -1,0 +1,16 @@
+{
+  "name": "@holonext/runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "fast-json-patch": "^3.1.1"
+  }
+}
