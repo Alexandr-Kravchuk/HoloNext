@@ -126,4 +126,83 @@ export const buildActions = (state: StateStore) => [
       return state.snapshot().cart;
     },
   }),
+
+  // Stress test: partial success
+  defineAction({
+    id: "cart.bulk-add",
+    kind: "mutation",
+    label: "Add multiple items to the cart in one call",
+    description: "Accepts an array of SKUs. Unknown SKUs fail individually; known ones succeed.",
+    params: {
+      type: "object",
+      required: ["skus"],
+      properties: {
+        skus: { type: "array", items: { type: "string" }, minItems: 1 },
+      },
+    },
+    safety: { idempotent: false, reversible: true },
+    behavior: { long_running: false, supports_partial: true },
+    async perform(params: { skus: string[] }, ctx) {
+      const succeeded: string[] = [];
+      const failed: { id: string; error: { code: string; message: string } }[] = [];
+      for (const sku of params.skus) {
+        const product = productBySku.get(sku);
+        if (!product) {
+          failed.push({ id: sku, error: { code: "UNKNOWN_SKU", message: `No product with SKU ${sku}` } });
+          continue;
+        }
+        state.update((draft) => {
+          const cart = draft.cart as CartState["cart"];
+          const existing = cart.items.find((i) => i.sku === sku);
+          const items = existing
+            ? cart.items.map((i) => i.sku === sku ? { ...i, quantity: i.quantity + 1 } : i)
+            : [...cart.items, { sku: product.sku, name: product.name, price: product.price, quantity: 1 }];
+          draft.cart = recompute(items);
+        });
+        succeeded.push(sku);
+      }
+      if (failed.length > 0 && succeeded.length > 0) {
+        ctx.emit({
+          type: "action.partially_succeeded",
+          succeeded_items: succeeded,
+          failed_items: failed,
+          summary: { total: params.skus.length, succeeded: succeeded.length, failed: failed.length },
+        });
+      }
+      return { succeeded, failed, summary: { total: params.skus.length, succeeded: succeeded.length, failed: failed.length } };
+    },
+  }),
+
+  // Stress test: long-running with progress events
+  defineAction({
+    id: "cart.checkout",
+    kind: "mutation",
+    label: "Process checkout (simulated long-running)",
+    description: "Simulates a multi-stage checkout that emits action.progress events.",
+    params: {
+      type: "object",
+      properties: {
+        payment_method: { type: "string", enum: ["card", "paypal", "applepay"], default: "card" },
+      },
+    },
+    safety: { idempotent: false, reversible: false, requires_confirmation: true, sensitive_data: true },
+    behavior: { long_running: true, estimated_duration_ms: 4000, supports_partial: false },
+    async perform(_params: { payment_method?: string }, ctx) {
+      const cart = ctx.state.cart as CartState["cart"];
+      if (cart.items.length === 0) throw new Error("Cart is empty — nothing to checkout");
+      const stages = [
+        { stage: "validating", message: "Validating cart contents", percent: 15 },
+        { stage: "reserving",  message: "Reserving inventory",      percent: 40 },
+        { stage: "charging",   message: "Charging payment method",  percent: 70 },
+        { stage: "confirming", message: "Sending confirmation",     percent: 95 },
+      ];
+      for (const s of stages) {
+        await new Promise((r) => setTimeout(r, 800));
+        ctx.emit({ type: "action.progress", ...s });
+      }
+      const order_id = `ORD-${Date.now().toString(36).toUpperCase()}`;
+      state.update((draft) => { draft.cart = recompute([]); });
+      return { order_id, total_charged: cart.total };
+    },
+  }),
 ];

@@ -4,7 +4,8 @@
  *
  * Stdio MCP server that proxies a HoloNext page's Manifest into an MCP-aware client
  * (Claude Code, Codex CLI, etc). Each Action becomes an MCP tool; tools/call is
- * forwarded to the page's HTTP endpoint.
+ * forwarded to the page's HTTP endpoint, and action.progress events are
+ * forwarded as MCP notifications/progress for long-running tools.
  *
  * Usage (Claude Code):
  *   claude mcp add holonext-cart -- bun run /abs/path/to/this/server.ts
@@ -34,11 +35,11 @@ interface ManifestAction {
   description?: string;
   params: Record<string, unknown>;
   safety?: Record<string, unknown>;
+  behavior?: { long_running?: boolean; estimated_duration_ms?: number };
 }
 interface Manifest {
   page: { title: string; context?: string };
   actions: ManifestAction[];
-  state: Record<string, unknown>;
 }
 
 async function fetchManifest(): Promise<Manifest> {
@@ -53,6 +54,7 @@ function actionsToTools(actions: ManifestAction[]): Tool[] {
     if (a.safety?.requires_human_input) flags.push("requires_human_input");
     if (a.safety?.requires_confirmation) flags.push("requires_confirmation");
     if (a.safety?.sensitive_data) flags.push("sensitive_data");
+    if (a.behavior?.long_running) flags.push("long_running");
     return {
       name: idToToolName(a.id),
       description: `${a.label}. ${a.description ?? ""} [${flags.join(", ")}]`,
@@ -71,18 +73,94 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools: actionsToTools(manifest.actions) };
 });
 
+let invocationCounter = 0;
+const nextInvocationId = () => `mcp-${Date.now().toString(36)}-${(++invocationCounter).toString(36)}`;
+
+/**
+ * Subscribe to the page event stream for the duration of a tool call,
+ * and forward `action.progress` events that match our invocation_id
+ * as MCP `notifications/progress` notifications.
+ *
+ * Hand-rolled SSE parser — Bun does not expose a global EventSource.
+ */
+function subscribeProgress(
+  invocationId: string,
+  progressToken: string | number,
+): () => void {
+  const controller = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/agent/events`, {
+        headers: { Accept: "text/event-stream" },
+        signal: controller.signal,
+      });
+      if (!res.body) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // SSE messages are separated by blank lines
+        let sep: number;
+        while ((sep = buf.indexOf("\n\n")) !== -1) {
+          const block = buf.slice(0, sep);
+          buf = buf.slice(sep + 2);
+          let event = "message";
+          let dataLine = "";
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataLine += line.slice(5).trim();
+          }
+          if (event !== "action.progress" || !dataLine) continue;
+          try {
+            const data = JSON.parse(dataLine);
+            if (data.invocation_id !== invocationId) continue;
+            server.notification({
+              method: "notifications/progress",
+              params: {
+                progressToken,
+                progress: data.percent ?? 0,
+                total: 100,
+                message: data.message ?? data.stage ?? "",
+              },
+            });
+          } catch { /* malformed event */ }
+        }
+      }
+    } catch (err) {
+      if ((err as { name?: string })?.name !== "AbortError") {
+        console.error("[mcp-bridge] SSE error:", err);
+      }
+    }
+  })();
+  return () => controller.abort();
+}
+
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const actionId = toolNameToId(req.params.name);
-  const res = await fetch(`${BASE_URL}/api/agent/actions/${actionId}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req.params.arguments ?? {}),
-  });
-  const body = await res.json();
-  return {
-    content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
-    isError: !res.ok,
-  };
+  const progressToken = req.params._meta?.progressToken;
+  const invocationId = nextInvocationId();
+
+  const unsubscribe = progressToken !== undefined
+    ? subscribeProgress(invocationId, progressToken as string | number)
+    : null;
+
+  try {
+    const res = await fetch(`${BASE_URL}/api/agent/actions/${actionId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...(req.params.arguments ?? {}), _invocation_id: invocationId }),
+    });
+    const body = await res.json();
+    return {
+      content: [{ type: "text", text: JSON.stringify(body, null, 2) }],
+      isError: !res.ok,
+    };
+  } finally {
+    unsubscribe?.();
+  }
 });
 
 const transport = new StdioServerTransport();

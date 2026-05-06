@@ -51,9 +51,31 @@ document.addEventListener("click", async (e) => {
   if (t.dataset.clear !== undefined) { await callAction("cart.clear"); refreshCart(); }
 });
 
+// Activity log — render every event for visibility during stress tests
+const activityEl = document.getElementById("activity");
+let activityHasContent = false;
+function logEvent(label, data) {
+  if (!activityHasContent) { activityEl.innerHTML = ""; activityHasContent = true; }
+  const row = document.createElement("div");
+  const t = new Date().toLocaleTimeString();
+  row.textContent = `[${t}] ${label} ${data ? JSON.stringify(data) : ""}`;
+  activityEl.prepend(row);
+}
+
 // Subscribe to event stream — agent and UI share the same channel
 const events = new EventSource("/api/agent/events");
-events.addEventListener("state.changed", () => refreshCart());
+events.addEventListener("state.changed", (e) => { refreshCart(); logEvent("state.changed", JSON.parse(e.data).patches); });
+events.addEventListener("action.started", (e) => logEvent("action.started", { id: JSON.parse(e.data).action_id }));
+events.addEventListener("action.progress", (e) => {
+  const d = JSON.parse(e.data);
+  logEvent(`action.progress ${d.percent}%`, { stage: d.stage, message: d.message });
+});
+events.addEventListener("action.succeeded", (e) => logEvent("action.succeeded", { id: JSON.parse(e.data).action_id, result: JSON.parse(e.data).result }));
+events.addEventListener("action.partially_succeeded", (e) => {
+  const d = JSON.parse(e.data);
+  logEvent("action.partially_succeeded", { summary: d.summary, failed: d.failed_items });
+});
+events.addEventListener("action.failed", (e) => logEvent("action.failed", JSON.parse(e.data).error));
 
 loadCatalog();
 refreshCart();
